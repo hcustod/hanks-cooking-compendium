@@ -2,22 +2,76 @@
 """
 Console recipe scraper: fetches a URL, extracts schema.org/Recipe (JSON-LD/microdata/RDFa),
 falls back to Readability, and prints a clean recipe or JSON.
+
+Legal posture (simple & safe):
+- No images are collected or displayed.
+- Full source URL is included for attribution.
+- A legal note is included in output to discourage redistribution.
 """
 
 import sys
 import argparse
 import textwrap
+import re
+import unicodedata
+import html as ihtml
 from urllib.parse import urlparse
 
 import httpx
 import orjson
 import extruct
-from lxml import html
+from lxml import html as lxml_html
 from readability import Document
 from w3lib.html import get_base_url
 
-UA = "CleanRecipeConsole/0.1 (+noncommercial; contact: console)"
+UA = "CleanRecipeConsole/0.3 (personal-use; no-images; contact: console)"
+LEGAL_NOTE = (
+    "For personal use/research only. Do not republish; see the original source link."
+)
 
+# ---------- text cleanup utilities ----------
+
+_ZERO_WIDTH = "".join(["\u200b", "\u200c", "\u200d", "\ufeff"])
+
+def _strip_html_tags(s: str) -> str:
+    if "<" in s and ">" in s:
+        try:
+            return lxml_html.fromstring(s).text_content()
+        except Exception:
+            return s
+    return s
+
+def clean_text(s: str) -> str:
+    if s is None:
+        return s
+    # 1) Unescape HTML entities (&amp;, &#39;, &nbsp;, &frac12;, etc.)
+    s = ihtml.unescape(s)
+    # 2) Strip any inline tags left in fields
+    s = _strip_html_tags(s)
+    # 3) Normalize Unicode (compose accents etc.)
+    s = unicodedata.normalize("NFC", s)
+    # 4) Remove zero-width & non-breaking spaces
+    for z in _ZERO_WIDTH:
+        s = s.replace(z, "")
+    s = s.replace("\u00a0", " ")
+    # 5) Collapse excessive spaces/tabs (but keep newlines)
+    s = re.sub(r"[ \t\f\v]+", " ", s)
+    # 6) Trim
+    return s.strip()
+
+def deep_clean(x):
+    """Recursively clean strings in dict/list structures."""
+    if isinstance(x, str):
+        return clean_text(x)
+    if isinstance(x, list):
+        out = [deep_clean(v) for v in x]
+        # drop empties that may result from cleaning
+        return [v for v in out if not isinstance(v, str) or v]
+    if isinstance(x, dict):
+        return {k: deep_clean(v) for k, v in x.items()}
+    return x
+
+# ---------- fetch & parsing ----------
 
 def fetch(url: str) -> tuple[str, bytes]:
     headers = {"User-Agent": UA}
@@ -26,12 +80,10 @@ def fetch(url: str) -> tuple[str, bytes]:
         resp.raise_for_status()
         return str(resp.url), resp.content
 
-
 def _coerce_list(v):
     if v is None:
         return []
     return v if isinstance(v, list) else [v]
-
 
 def _as_text_list(maybe_list):
     out = []
@@ -43,22 +95,27 @@ def _as_text_list(maybe_list):
     return [s.strip() for s in out if s and str(s).strip()]
 
 
+_ISO_DUR = re.compile(r"^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?$")
+_HUMAN_DUR = re.compile(r"(?:(\d+)\s*d(?:ays?)?\b)?\s*(?:(\d+)\s*h(?:ours?|rs?)?\b)?\s*(?:(\d+)\s*m(?:in(?:s|utes)?)?\b)?", re.I)
+
 def _minutes(iso_like: str | None) -> int | None:
-    # Tiny parser for ISO8601 durations like "PT1H30M"
-    if not iso_like or not iso_like.startswith("P"):
+    if not iso_like:
         return None
-    t = iso_like.split("T")[1] if "T" in iso_like else ""
-    h = m = 0
-    try:
-        if "H" in t:
-            parts = t.split("H")
-            h = int(parts[0])
-            t = parts[1]
-        if "M" in t:
-            m = int(t.split("M")[0])
-        return h * 60 + m
-    except Exception:
-        return None
+    s = iso_like.strip()
+    m = _ISO_DUR.match(s)
+    if m:
+        days = int(m.group("days") or 0)
+        hours = int(m.group("hours") or 0)
+        minutes = int(m.group("minutes") or 0)
+        seconds = int(m.group("seconds") or 0)
+        total = days * 1440 + hours * 60 + minutes + (seconds // 60)
+        return total or None
+    hm = _HUMAN_DUR.search(s)
+    if hm:
+        d, h, mi = [int(x or 0) for x in hm.groups()]
+        total = d * 1440 + h * 60 + mi
+        return total or None
+    return None
 
 
 def _iter_jsonld_objects(jsonld_list):
@@ -81,7 +138,6 @@ def _iter_jsonld_objects(jsonld_list):
                             if isinstance(item, dict):
                                 yield item
 
-
 def parse_structured(content: bytes, final_url: str):
     base = get_base_url(content.decode(errors="ignore"), final_url)
     data = extruct.extract(
@@ -90,22 +146,18 @@ def parse_structured(content: bytes, final_url: str):
         syntaxes=["json-ld", "microdata", "rdfa"],
         uniform=True,
     )
-
     # JSON-LD first
     for obj in _iter_jsonld_objects(data.get("json-ld", [])):
         t = obj.get("@type")
         if t == "Recipe" or (isinstance(t, list) and "Recipe" in t):
             return obj
-
     # microdata / RDFa fallbacks
     for syntax in ("microdata", "rdfa"):
         for item in data.get(syntax, []):
             types = item.get("@type") or []
             if "Recipe" in _coerce_list(types):
                 return item
-
     return None
-
 
 def _extract_instructions(instr):
     """Flatten various instruction formats (strings, HowToStep arrays, sections)."""
@@ -138,43 +190,33 @@ def _extract_instructions(instr):
     # Unknown shape
     return steps
 
-
 def normalize_recipe(recipe_obj: dict, final_url: str):
     title = recipe_obj.get("name") or recipe_obj.get("headline") or "Untitled"
     desc = recipe_obj.get("description")
 
-    # image may be string | dict | list
-    img = None
-    img_field = recipe_obj.get("image")
-    if isinstance(img_field, dict):
-        img = img_field.get("url")
-    elif isinstance(img_field, list):
-        img = img_field[0] if img_field else None
-    else:
-        img = img_field
-
+    # Images intentionally ignored for legal safety
     servings = str(recipe_obj.get("recipeYield") or "") or None
     ingredients = _as_text_list(
         recipe_obj.get("recipeIngredient") or recipe_obj.get("ingredients")
     )
-
     steps = _extract_instructions(recipe_obj.get("recipeInstructions"))
 
-    return {
+    recipe = {
         "title": title.strip(),
         "description": (desc or None),
         "servings": servings,
         "prep_time_min": _minutes(recipe_obj.get("prepTime")),
         "cook_time_min": _minutes(recipe_obj.get("cookTime")),
         "total_time_min": _minutes(recipe_obj.get("totalTime")),
-        "image_url": img,
+        "image_url": None,  # always None
         "ingredients": [i for i in ingredients if i.strip()],
         "steps": [s for s in steps if s.strip()],
         "source_url": final_url,
         "source_host": urlparse(final_url).hostname,
         "extraction": "structured",
+        "legal_note": LEGAL_NOTE,
     }
-
+    return deep_clean(recipe)
 
 def readability_fallback(content: bytes, final_url: str):
     # Readability expects text, not bytes
@@ -185,24 +227,12 @@ def readability_fallback(content: bytes, final_url: str):
 
     doc = Document(text)
     html_part = doc.summary(html_partial=True)
-    tree = html.fromstring(html_part)
+    tree = lxml_html.fromstring(html_part)
     title = (doc.short_title() or "Untitled").strip()
 
     tokens = [
-        "cup",
-        "cups",
-        "tsp",
-        "tbsp",
-        "teaspoon",
-        "tablespoon",
-        "g",
-        "gram",
-        "kg",
-        "ml",
-        "l",
-        "oz",
-        "ounce",
-        "lb",
+        "cup", "cups", "tsp", "tbsp", "teaspoon", "tablespoon",
+        "g", "gram", "kg", "ml", "l", "oz", "ounce", "lb",
     ]
     candidates = [li.text_content().strip() for li in tree.xpath("//li")]
     ingredients = [c for c in candidates if any(tok in c.lower() for tok in tokens)]
@@ -212,21 +242,22 @@ def readability_fallback(content: bytes, final_url: str):
         if len(p.text_content().split()) > 5
     ]
 
-    return {
+    recipe = {
         "title": title,
         "description": None,
         "servings": None,
         "prep_time_min": None,
         "cook_time_min": None,
         "total_time_min": None,
-        "image_url": None,
+        "image_url": None,  # always None
         "ingredients": ingredients[:50],
         "steps": steps[:50],
         "source_url": final_url,
         "source_host": urlparse(final_url).hostname,
         "extraction": "readability",
+        "legal_note": LEGAL_NOTE,
     }
-
+    return deep_clean(recipe)
 
 def scrape(url: str) -> dict:
     final_url, content = fetch(url)
@@ -234,7 +265,6 @@ def scrape(url: str) -> dict:
     return normalize_recipe(data, final_url) if data else readability_fallback(
         content, final_url
     )
-
 
 def print_pretty(r: dict):
     def t(label, val):
@@ -245,6 +275,7 @@ def print_pretty(r: dict):
     print("=" * 80)
     print(r["title"])
     print("=" * 80)
+    print(f"Note: {LEGAL_NOTE}")
     t("Source", r["source_url"])
     t("Site", r["source_host"])
     t("Servings", r.get("servings"))
@@ -255,9 +286,6 @@ def print_pretty(r: dict):
     if r.get("description"):
         print("\nDescription:")
         print(textwrap.fill(r["description"], width=80))
-
-    if r.get("image_url"):
-        print("\nImage:", r["image_url"])
 
     if r.get("ingredients"):
         print("\nIngredients:")
@@ -271,7 +299,6 @@ def print_pretty(r: dict):
 
     print(f"\n[extracted via: {r.get('extraction')}]")
     print()
-
 
 def main():
     ap = argparse.ArgumentParser(
@@ -299,7 +326,6 @@ def main():
             sys.stderr.write(f"[ERROR] {u}: {e}\n")
 
     sys.exit(error)
-
 
 if __name__ == "__main__":
     main()
