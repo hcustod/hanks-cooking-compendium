@@ -1,3 +1,4 @@
+# ── OS cruft ───────────────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -10,11 +11,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-.env
-.env.*
-!.env.example
-*.local
-
+# ── Python ─────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -22,63 +19,74 @@ __pycache__/
 *.so
 *.egg
 *.egg-info/
-dist/
-build/
 .eggs/
-pip-wheel-metadata/
-.installed.cfg
 .python-version
 .venv/
 venv/
+.env
+.env.*
+!.env.example
 .envrc
+*.log
 .mypy_cache/
 .pytype/
 .pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-coverage.xml
 .pyre/
 .ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
-*.db
-*.sqlite
-*.sqlite3
-!**/fixtures/*.sqlite*
-
+# ── Node / Frontend (Astro + Vite) ─────────────────────────────────────────────
 node_modules/
 dist/
 build/
-.next/
-.out/
-.nuxt/
-.vercel/
-.netlify/
-.pnpm-store/
-.npm/
-.yarn/*
-!.yarn/patches
-!.yarn/releases
-!.yarn/plugins
-!.yarn/sdks
-!.yarn/versions
+.astro/
 .vite/
 .parcel-cache/
-*.log
+*.local
+
+# ── Yarn Berry (PnP) ──────────────────────────────────────────────────────────
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+# keep these folders if present:
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+# keep PnP artifacts (should be committed)
+!.pnp.cjs
+!.pnp.loader.mjs
+
+# Legacy/npm logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-.vscode/
-!.vscode/extensions.json
-.idea/
-*.iml
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.swp
-
+# ── Docker / Infra ────────────────────────────────────────────────────────────
+infra/compose/*.env
+infra/compose/.env.local
+# If you ever bind-mount data dirs locally, ignore them here:
+infra/compose/dbdata/
+infra/compose/pgdata/
 docker-compose.override.yml
 
+# ── Postgres dumps (keep schema in database/scripts/) ─────────────────────────
+*.dump
+*.sql.gz
+dump.sql
+
+# ── Editors / IDE ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.swp
+*.swo
