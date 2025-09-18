@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    platform: linux/arm64
+    container_name: hcc-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hcc}
+      POSTGRES_USER: ${POSTGRES_USER:-hcc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hcc}
+    volumes:
+      # Persistent data volume
+      - dbdata:/var/lib/postgresql/data
+      # Run your schema on first init (only executes when the DB dir is empty)
+      - ../../database/scripts/init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ../../
+      dockerfile: app/api/Dockerfile
+    container_name: hcc-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env
+    environment:
+      # Fallbacks if not present in .env
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://hcc:hcc@db:5432/hcc}
+      HCC_DEFAULT_USER_ID: ${HCC_DEFAULT_USER_ID:-00000000-0000-0000-0000-000000000001}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:4321}
+    volumes:
+      # Live-reload your code during dev
+      - ../../app:/app/app:ro
+      - ../../packages:/app/packages:ro
+      - ../../database:/app/database:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    platform: linux/arm64
+    container_name: hcc-pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - pgadmindata:/var/lib/pgadmin
+
+volumes:
+  dbdata: {}
+  pgadmindata: {}

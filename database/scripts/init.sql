@@ -1,5 +1,3 @@
--- 001_init.sql  — schema for Hank's Cooking Compendium
-
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pg_trgm;    -- fast title searches
