@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;    -- fast title searches
 
 -- Optional enum for clarity
 DO $$
-BEGIN
+BEGIN 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'extraction_method') THEN
     CREATE TYPE extraction_method AS ENUM ('structured', 'readability');
   END IF;
