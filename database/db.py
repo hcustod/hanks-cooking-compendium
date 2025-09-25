@@ -1,14 +1,16 @@
-import os
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.engine import Engine
+import os 
+from sqlalchemy import create_engine
 
-metadata = MetaData()
+_engine = None
 
-def get_database_url() -> str:
-    url = os.geteng("DATABASE_URL")
-    if not url: 
-        raise RuntimeError("Database url is not set.")
-    return url 
+def get_engine():
+    global _engine
+    if _engine is None: 
+        url = os.getenv(
+            "DATABASE_URL", 
+            "postgresql+psycopg2://postgres:postgres@localhost:5432/hcc_db"
+        )
+        _engine = create_engine(url, pool_pre_ping=True, future=True)
+    return _engine
 
-def get_engine() -> Engine:
-    return create_engine(get_database_url(), future=True)
+
