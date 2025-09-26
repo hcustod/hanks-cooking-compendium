@@ -1,4 +1,4 @@
-from sqlalchemy import Table, Column, Text, Integer, DateTime, MetaData
+from sqlalchemy import Table, Column, Text, Integer, DateTime, MetaData, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 metadata = MetaData()
@@ -20,6 +20,6 @@ recipes = Table(
     Column("extraction", Text, nullable=False),
     Column("legal_note", Text, nullable=False),
     Column("raw_json", JSONB, nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
 )
