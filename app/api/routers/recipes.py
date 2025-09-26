@@ -23,6 +23,7 @@ def list_recipes(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
+    engine = get_engine()
     stmt = select(recipes_table)
     if host:
         stmt = stmt.where(recipes_table.c.source_host == host)
@@ -30,7 +31,6 @@ def list_recipes(
         stmt = stmt.where(recipes_table.c.title.ilike(f"%{q}%"))
     stmt = stmt.order_by(recipes_table.c.created_at.desc()).limit(limit).offset(offset)
 
-    engine = get_engine()
     with engine.connect() as conn:
         rows: Result = conn.execute(stmt).fetchall()
     return [row_to_dict(r) for r in rows]
