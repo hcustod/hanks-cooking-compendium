@@ -1,7 +1,14 @@
 from sqlalchemy import Table, Column, Text, Integer, DateTime, MetaData, text
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM
 
 metadata = MetaData()
+
+extraction_enum = ENUM(
+    "structured",
+    "readability",
+    name="extraction_method",
+    create_type=False,
+)
 
 recipes = Table(
     "recipes", metadata,
